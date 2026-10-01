@@ -16,7 +16,7 @@
     API_URL:
       'https://script.google.com/macros/s/AKfycbw9poI4pAipmx6CduwLxGxYNnSENCI7Rinsdkd7oBVQVvHo0AJ0Dc7Y1LdpwvhSQcQ0Nw/exec',
 
-    VERSION: '1.0.0',
+    VERSION: '1.0.1',
 
     API_TIMEOUT: 15000
 
