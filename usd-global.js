@@ -1,6 +1,6 @@
 /* =====================================================
    USD — GLOBAL JS
-   Версия: 1.0.0
+   Версия: 1.0.2
    ===================================================== */
 
 (function (window) {
@@ -16,62 +16,57 @@
     API_URL:
       'https://script.google.com/macros/s/AKfycbw9poI4pAipmx6CduwLxGxYNnSENCI7Rinsdkd7oBVQVvHo0AJ0Dc7Y1LdpwvhSQcQ0Nw/exec',
 
-    VERSION: '1.0.1',
+    VERSION: '1.0.2',
 
-    API_TIMEOUT: 15000
+    API_TIMEOUT: 25000,
+
+    API_RETRIES: 2,
+
+    RETRY_DELAY: 700
 
   };
 
 
   /* =====================================================
-     USD OBJECT
+     JSONP REQUEST
      ===================================================== */
 
-  const USD = {
+  function apiRequest_(action, params) {
 
-    VERSION: CONFIG.VERSION,
+    return new Promise(function (resolve, reject) {
 
-    API_URL: CONFIG.API_URL,
+      params = params || {};
 
+      const callbackName =
+        'usdApiCallback_' +
+        Date.now() +
+        '_' +
+        Math.floor(
+          Math.random() * 100000
+        );
 
-    /* ===================================================
-       API REQUEST
-       =================================================== */
+      const script =
+        document.createElement('script');
 
-    api: function (action, params) {
+      const query =
+        new URLSearchParams();
 
-      return new Promise(function (resolve, reject) {
+      query.set(
+        'action',
+        action
+      );
 
-        params = params || {};
-
-        if (!action) {
-          reject(new Error('Не указано действие API.'));
-          return;
-        }
-
-
-        const callbackName =
-          'usdApiCallback_' +
-          Date.now() +
-          '_' +
-          Math.floor(Math.random() * 100000);
-
-
-        const script =
-          document.createElement('script');
+      query.set(
+        'callback',
+        callbackName
+      );
 
 
-        const query =
-          new URLSearchParams();
+      Object.keys(params).forEach(
+        function (key) {
 
-
-        query.set('action', action);
-        query.set('callback', callbackName);
-
-
-        Object.keys(params).forEach(function (key) {
-
-          const value = params[key];
+          const value =
+            params[key];
 
           if (
             value !== undefined &&
@@ -80,21 +75,59 @@
 
             query.set(
               key,
-              typeof value === 'object'
-                ? JSON.stringify(value)
-                : String(value)
+              String(value)
             );
 
           }
 
-        });
+        }
+      );
 
 
-        let finished = false;
+      let completed = false;
 
 
-        const timeout =
-          setTimeout(function () {
+      function cleanup() {
+
+        clearTimeout(timeout);
+
+        try {
+
+          delete window[
+            callbackName
+          ];
+
+        } catch (error) {
+
+          window[
+            callbackName
+          ] = undefined;
+
+        }
+
+
+        if (
+          script.parentNode
+        ) {
+
+          script.parentNode.removeChild(
+            script
+          );
+
+        }
+
+      }
+
+
+      const timeout =
+        setTimeout(
+          function () {
+
+            if (completed) {
+              return;
+            }
+
+            completed = true;
 
             cleanup();
 
@@ -104,218 +137,321 @@
               )
             );
 
-          }, CONFIG.API_TIMEOUT);
+          },
+          CONFIG.API_TIMEOUT
+        );
 
 
-        function cleanup() {
+      window[
+        callbackName
+      ] = function (response) {
 
-          clearTimeout(timeout);
+        if (completed) {
+          return;
+        }
 
-          try {
-            delete window[callbackName];
-          } catch (error) {
-            window[callbackName] = undefined;
-          }
+        completed = true;
 
-          if (script.parentNode) {
-            script.parentNode.removeChild(script);
-          }
+        cleanup();
+
+
+        if (
+          !response ||
+          response.success !== true
+        ) {
+
+          reject(
+            new Error(
+              response &&
+              response.error
+                ? response.error
+                : 'Ошибка API.'
+            )
+          );
+
+          return;
 
         }
 
 
-        window[callbackName] =
-          function (response) {
+        resolve(
+          response.data
+        );
 
-            if (finished) {
-              return;
-            }
-
-            finished = true;
-
-            cleanup();
+      };
 
 
-            if (
-              !response ||
-              response.success !== true
-            ) {
+      script.onerror =
+        function () {
 
-              reject(
-                new Error(
-                  response &&
-                  response.error
-                    ? response.error
-                    : 'Ошибка API.'
-                )
+          if (completed) {
+            return;
+          }
+
+          completed = true;
+
+          cleanup();
+
+          reject(
+            new Error(
+              'Не удалось подключиться к API.'
+            )
+          );
+
+        };
+
+
+      script.src =
+        CONFIG.API_URL +
+        '?' +
+        query.toString();
+
+
+      document.body.appendChild(
+        script
+      );
+
+    });
+
+  }
+
+
+  /* =====================================================
+     API WITH RETRIES
+     ===================================================== */
+
+  async function api(
+    action,
+    params
+  ) {
+
+    let lastError = null;
+
+
+    for (
+      let attempt = 1;
+      attempt <= CONFIG.API_RETRIES;
+      attempt++
+    ) {
+
+      try {
+
+        return await apiRequest_(
+          action,
+          params
+        );
+
+      } catch (error) {
+
+        lastError = error;
+
+
+        console.warn(
+          'USD API: попытка ' +
+          attempt +
+          ' из ' +
+          CONFIG.API_RETRIES +
+          ' не удалась.',
+          error
+        );
+
+
+        if (
+          attempt <
+          CONFIG.API_RETRIES
+        ) {
+
+          await new Promise(
+            function (resolve) {
+
+              setTimeout(
+                resolve,
+                CONFIG.RETRY_DELAY
               );
 
-              return;
             }
+          );
+
+        }
+
+      }
+
+    }
 
 
-            resolve(response.data);
+    throw lastError;
 
-          };
-
-
-        script.onerror =
-          function () {
-
-            if (finished) {
-              return;
-            }
-
-            finished = true;
-
-            cleanup();
-
-            reject(
-              new Error(
-                'Не удалось подключиться к API.'
-              )
-            );
-
-          };
+  }
 
 
-        script.src =
-          CONFIG.API_URL +
-          '?' +
-          query.toString();
+  /* =====================================================
+     USD OBJECT
+     ===================================================== */
 
+  const USD = {
 
-        document.body.appendChild(script);
+    VERSION:
+      CONFIG.VERSION,
 
-      });
+    API_URL:
+      CONFIG.API_URL,
 
-    },
+    api:
+      api,
 
 
     /* ===================================================
        HTML ESCAPE
        =================================================== */
 
-    escapeHtml: function (value) {
+    escapeHtml:
+      function (value) {
 
-      return String(value ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
+        return String(
+          value ?? ''
+        )
+          .replace(
+            /&/g,
+            '&amp;'
+          )
+          .replace(
+            /</g,
+            '&lt;'
+          )
+          .replace(
+            />/g,
+            '&gt;'
+          )
+          .replace(
+            /"/g,
+            '&quot;'
+          )
+          .replace(
+            /'/g,
+            '&#039;'
+          );
 
-    },
+      },
 
 
     /* ===================================================
        ATTRIBUTE ESCAPE
        =================================================== */
 
-    escapeAttribute: function (value) {
+    escapeAttribute:
+      function (value) {
 
-      return this.escapeHtml(value);
+        return this.escapeHtml(
+          value
+        );
 
-    },
+      },
 
 
     /* ===================================================
-       DATE FORMAT
+       DATE
        =================================================== */
 
-    formatDate: function (value) {
+    formatDate:
+      function (value) {
 
-      if (!value) {
-        return '—';
-      }
-
-
-      const date =
-        new Date(value);
-
-
-      if (
-        Number.isNaN(
-          date.getTime()
-        )
-      ) {
-
-        return String(value);
-
-      }
-
-
-      return date.toLocaleString(
-        'ru-RU',
-        {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
+        if (!value) {
+          return '—';
         }
-      );
-
-    },
 
 
-    /* ===================================================
-       SIMPLE DATE
-       =================================================== */
-
-    formatDateOnly: function (value) {
-
-      if (!value) {
-        return '—';
-      }
+        const date =
+          new Date(value);
 
 
-      const date =
-        new Date(value);
+        if (
+          Number.isNaN(
+            date.getTime()
+          )
+        ) {
+
+          return String(value);
+
+        }
 
 
-      if (
-        Number.isNaN(
-          date.getTime()
-        )
-      ) {
+        return date.toLocaleString(
+          'ru-RU',
+          {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          }
+        );
 
-        return String(value);
-
-      }
-
-
-      return date.toLocaleDateString(
-        'ru-RU'
-      );
-
-    },
+      },
 
 
     /* ===================================================
-       ERROR
+       DATE ONLY
        =================================================== */
 
-    errorMessage: function (error) {
+    formatDateOnly:
+      function (value) {
 
-      if (
-        error &&
-        error.message
-      ) {
+        if (!value) {
+          return '—';
+        }
 
-        return error.message;
+
+        const date =
+          new Date(value);
+
+
+        if (
+          Number.isNaN(
+            date.getTime()
+          )
+        ) {
+
+          return String(value);
+
+        }
+
+
+        return date.toLocaleDateString(
+          'ru-RU'
+        );
+
+      },
+
+
+    /* ===================================================
+       ERROR MESSAGE
+       =================================================== */
+
+    errorMessage:
+      function (error) {
+
+        if (
+          error &&
+          error.message
+        ) {
+
+          return error.message;
+
+        }
+
+
+        return String(
+          error ||
+          'Неизвестная ошибка.'
+        );
 
       }
-
-      return String(error || 'Неизвестная ошибка.');
-
-    }
 
   };
 
 
   /* =====================================================
-     GLOBAL USD
+     GLOBAL
      ===================================================== */
 
   window.USD = USD;
@@ -330,7 +466,8 @@
       'usd:global-ready',
       {
         detail: {
-          version: CONFIG.VERSION
+          version:
+            CONFIG.VERSION
         }
       }
     )
