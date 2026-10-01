@@ -4,7 +4,7 @@
 
   var CONFIG = {
     API_URL:
-      'https://script.google.com/macros/s/AKfycbzBKrWCpyQMFYbrFPDeJvvdLh_cOzF5g0sIU0gnyveHciNJiZKqeE_7WF0ljDJK9DYaqQ/exec',
+      'https://script.google.com/macros/s/AKfycbyGxJapubUBYKXwxESv5f6Ea13JT4LuIPgvgJ7NBHhJZDXQtq0QcfGGOFL7ZVn78VfUzA/exec',
 
     VERSION: '1.0.3',
 
