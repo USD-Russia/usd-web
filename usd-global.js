@@ -14,7 +14,7 @@
   const CONFIG = {
 
     API_URL:
-      'https://script.google.com/macros/s/AKfycbxovEfjZX-CfLLDQLnwEK_CRAqGvmH25kYtCS6to5QyQnWeG-YZ_DIQ1G4lANmlVPhTlQ/exec',
+      'https://script.google.com/macros/s/AKfycbw9poI4pAipmx6CduwLxGxYNnSENCI7Rinsdkd7oBVQVvHo0AJ0Dc7Y1LdpwvhSQcQ0Nw/exec',
 
     VERSION: '1.0.0',
 
