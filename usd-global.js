@@ -221,68 +221,113 @@
      ===================================================== */
 
   async function api(
-    action,
-    params
+  action,
+  params
+) {
+
+  let lastError = null;
+
+  const totalStart = performance.now();
+
+  for (
+    let attempt = 1;
+    attempt <= CONFIG.API_RETRIES;
+    attempt++
   ) {
 
-    let lastError = null;
+    const attemptStart = performance.now();
 
+    try {
 
-    for (
-      let attempt = 1;
-      attempt <= CONFIG.API_RETRIES;
-      attempt++
-    ) {
+      const result = await apiRequest_(
+        action,
+        params
+      );
 
-      try {
-
-        return await apiRequest_(
-          action,
-          params
+      const elapsed =
+        Math.round(
+          performance.now() -
+          attemptStart
         );
 
-      } catch (error) {
-
-        lastError = error;
-
-
-        console.warn(
-          'USD API: попытка ' +
-          attempt +
-          ' из ' +
-          CONFIG.API_RETRIES +
-          ' не удалась.',
-          error
+      const totalElapsed =
+        Math.round(
+          performance.now() -
+          totalStart
         );
 
+      console.log(
+        'USD API: ' +
+        action +
+        ' — ' +
+        elapsed +
+        ' ms' +
+        (
+          attempt > 1
+            ? ' (попытка ' + attempt + ')'
+            : ''
+        ) +
+        ', всего: ' +
+        totalElapsed +
+        ' ms'
+      );
 
-        if (
-          attempt <
-          CONFIG.API_RETRIES
-        ) {
+      return result;
 
-          await new Promise(
-            function (resolve) {
+    } catch (error) {
 
-              setTimeout(
-                resolve,
-                CONFIG.RETRY_DELAY
-              );
+      lastError = error;
 
-            }
-          );
+      const elapsed =
+        Math.round(
+          performance.now() -
+          attemptStart
+        );
 
-        }
+      console.warn(
+        'USD API: ' +
+        action +
+        ' — попытка ' +
+        attempt +
+        ' из ' +
+        CONFIG.API_RETRIES +
+        ' не удалась за ' +
+        elapsed +
+        ' ms.',
+        error
+      );
+
+      if (
+        attempt <
+        CONFIG.API_RETRIES
+      ) {
+
+        await new Promise(
+          function (resolve) {
+
+            setTimeout(
+              resolve,
+              CONFIG.RETRY_DELAY
+            );
+
+          }
+        );
 
       }
 
     }
 
-
-    throw lastError;
-
   }
 
+  console.error(
+    'USD API: ' +
+    action +
+    ' окончательно завершился ошибкой.'
+  );
+
+  throw lastError;
+
+}
 
   /* =====================================================
      USD OBJECT
