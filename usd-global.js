@@ -1,214 +1,54 @@
-/* =====================================================
-   USD — GLOBAL JS
-   Версия: 1.0.2
-   ===================================================== */
-
 (function (window) {
 
   'use strict';
 
-  /* =====================================================
-     CONFIG
-     ===================================================== */
-
-  const CONFIG = {
-
+  var CONFIG = {
     API_URL:
-      'https://script.google.com/macros/s/AKfycby2bsWAMpoF3pfrIO-Rp9CVWJKcQMaBlkFcnYm_qvP81sG7yKeHhBq7Q8XcpV7mlfLGVw/exec',
+      'https://script.google.com/macros/s/AKfycbzBKrWCpyQMFYbrFPDeJvvdLh_cOzF5g0sIU0gnyveHciNJiZKqeE_7WF0ljDJK9DYaqQ/exec',
 
-    VERSION: '1.0.2',
+    VERSION: '1.0.3',
 
     API_TIMEOUT: 25000,
 
     API_RETRIES: 2,
 
     RETRY_DELAY: 700
-
   };
 
 
-  /* =====================================================
-     JSONP REQUEST
-     ===================================================== */
+  /*
+   * =========================================================
+   * CALLBACK
+   * =========================================================
+   */
 
-  function apiRequest_(action, params) {
+  function createCallbackName() {
 
-    return new Promise(function (resolve, reject) {
+    return (
+      'usd_jsonp_' +
+      Date.now() +
+      '_' +
+      Math.random()
+        .toString(36)
+        .substring(2, 10)
+    );
 
-      params = params || {};
-
-      const callbackName =
-        'usdApiCallback_' +
-        Date.now() +
-        '_' +
-        Math.floor(
-          Math.random() * 100000
-        );
-
-      const script =
-        document.createElement('script');
-
-      const query =
-        new URLSearchParams();
-
-      query.set(
-        'action',
-        action
-      );
-
-      query.set(
-        'callback',
-        callbackName
-      );
+  }
 
 
-      Object.keys(params).forEach(
-        function (key) {
+  /*
+   * =========================================================
+   * SLEEP
+   * =========================================================
+   */
 
-          const value =
-            params[key];
+  function sleep(ms) {
 
-          if (
-            value !== undefined &&
-            value !== null
-          ) {
+    return new Promise(function (resolve) {
 
-            query.set(
-              key,
-              String(value)
-            );
-
-          }
-
-        }
-      );
-
-
-      let completed = false;
-
-
-      function cleanup() {
-
-        clearTimeout(timeout);
-
-        try {
-
-          delete window[
-            callbackName
-          ];
-
-        } catch (error) {
-
-          window[
-            callbackName
-          ] = undefined;
-
-        }
-
-
-        if (
-          script.parentNode
-        ) {
-
-          script.parentNode.removeChild(
-            script
-          );
-
-        }
-
-      }
-
-
-      const timeout =
-        setTimeout(
-          function () {
-
-            if (completed) {
-              return;
-            }
-
-            completed = true;
-
-            cleanup();
-
-            reject(
-              new Error(
-                'API: превышено время ожидания ответа.'
-              )
-            );
-
-          },
-          CONFIG.API_TIMEOUT
-        );
-
-
-      window[
-        callbackName
-      ] = function (response) {
-
-        if (completed) {
-          return;
-        }
-
-        completed = true;
-
-        cleanup();
-
-
-        if (
-          !response ||
-          response.success !== true
-        ) {
-
-          reject(
-            new Error(
-              response &&
-              response.error
-                ? response.error
-                : 'Ошибка API.'
-            )
-          );
-
-          return;
-
-        }
-
-
-        resolve(
-          response.data
-        );
-
-      };
-
-
-      script.onerror =
-        function () {
-
-          if (completed) {
-            return;
-          }
-
-          completed = true;
-
-          cleanup();
-
-          reject(
-            new Error(
-              'Не удалось подключиться к API.'
-            )
-          );
-
-        };
-
-
-      script.src =
-        CONFIG.API_URL +
-        '?' +
-        query.toString();
-
-
-      document.body.appendChild(
-        script
+      setTimeout(
+        resolve,
+        ms
       );
 
     });
@@ -216,306 +56,672 @@
   }
 
 
-  /* =====================================================
-     API WITH RETRIES
-     ===================================================== */
+  /*
+   * =========================================================
+   * SERIALIZE PARAMETER
+   *
+   * ВАЖНО:
+   * массивы и объекты отправляем через JSON.stringify().
+   *
+   * Было:
+   * ['CLS-001', 'CLS-002']
+   *
+   * могло превратиться в:
+   * CLS-001,CLS-002
+   *
+   * Теперь отправляется:
+   * ["CLS-001","CLS-002"]
+   * =========================================================
+   */
 
-  async function api(
-  action,
-  params
-) {
+  function serializeValue(value) {
 
-  let lastError = null;
+    if (
+      Array.isArray(value)
+    ) {
 
-  const totalStart = performance.now();
+      return JSON.stringify(
+        value
+      );
 
-  for (
-    let attempt = 1;
-    attempt <= CONFIG.API_RETRIES;
-    attempt++
+    }
+
+
+    if (
+      value !== null &&
+      typeof value === 'object'
+    ) {
+
+      return JSON.stringify(
+        value
+      );
+
+    }
+
+
+    if (
+      value === undefined ||
+      value === null
+    ) {
+
+      return '';
+
+    }
+
+
+    return String(
+      value
+    );
+
+  }
+
+
+  /*
+   * =========================================================
+   * BUILD QUERY
+   * =========================================================
+   */
+
+  function buildQuery(
+    params,
+    callbackName
   ) {
 
-    const attemptStart = performance.now();
+    var searchParams =
+      new URLSearchParams();
 
-    try {
 
-      const result = await apiRequest_(
-        action,
-        params
-      );
+    Object.keys(
+      params || {}
+    ).forEach(
+      function (key) {
 
-      const elapsed =
-        Math.round(
-          performance.now() -
-          attemptStart
+        var value =
+          params[key];
+
+        searchParams.set(
+          key,
+          serializeValue(
+            value
+          )
         );
 
-      const totalElapsed =
-        Math.round(
-          performance.now() -
-          totalStart
-        );
+      }
+    );
 
-      console.log(
-        'USD API: ' +
-        action +
-        ' — ' +
-        elapsed +
-        ' ms' +
-        (
-          attempt > 1
-            ? ' (попытка ' + attempt + ')'
-            : ''
-        ) +
-        ', всего: ' +
-        totalElapsed +
-        ' ms'
+
+    searchParams.set(
+      'callback',
+      callbackName
+    );
+
+
+    searchParams.set(
+      '_usd_version',
+      CONFIG.VERSION
+    );
+
+
+    return searchParams.toString();
+
+  }
+
+
+  /*
+   * =========================================================
+   * ERROR MESSAGE
+   * =========================================================
+   */
+
+  function errorMessage(error) {
+
+    if (!error) {
+
+      return 'Неизвестная ошибка.';
+
+    }
+
+
+    if (
+      typeof error === 'string'
+    ) {
+
+      return error;
+
+    }
+
+
+    if (error.message) {
+
+      return error.message;
+
+    }
+
+
+    if (
+      error.error
+    ) {
+
+      return String(
+        error.error
       );
 
-      return result;
+    }
 
-    } catch (error) {
 
-      lastError = error;
+    return String(
+      error
+    );
 
-      const elapsed =
-        Math.round(
-          performance.now() -
-          attemptStart
-        );
+  }
 
-      console.warn(
-        'USD API: ' +
-        action +
-        ' — попытка ' +
-        attempt +
-        ' из ' +
-        CONFIG.API_RETRIES +
-        ' не удалась за ' +
-        elapsed +
-        ' ms.',
-        error
+
+  /*
+   * =========================================================
+   * UNWRAP API RESPONSE
+   *
+   * Apps Script обычно возвращает:
+   *
+   * {
+   *   success: true,
+   *   data: ...
+   * }
+   *
+   * Для старого frontend API оставляем поведение:
+   *
+   * USD.api('get_stages')
+   *
+   * возвращает непосредственно data.
+   * =========================================================
+   */
+
+  function unwrapResponse(
+    response
+  ) {
+
+    if (
+      !response
+    ) {
+
+      return response;
+
+    }
+
+
+    if (
+      response.success === false
+    ) {
+
+      throw new Error(
+        response.error ||
+        response.message ||
+        'USD API вернул ошибку.'
       );
 
-      if (
-        attempt <
-        CONFIG.API_RETRIES
+    }
+
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        response,
+        'data'
+      )
+    ) {
+
+      return response.data;
+
+    }
+
+
+    return response;
+
+  }
+
+
+  /*
+   * =========================================================
+   * JSONP REQUEST
+   * =========================================================
+   */
+
+  function requestJsonp(
+    action,
+    params
+  ) {
+
+    return new Promise(
+      function (
+        resolve,
+        reject
       ) {
 
-        await new Promise(
-          function (resolve) {
+        var callbackName =
+          createCallbackName();
 
-            setTimeout(
-              resolve,
-              CONFIG.RETRY_DELAY
+
+        var script =
+          document.createElement(
+            'script'
+          );
+
+
+        var finished =
+          false;
+
+
+        var startedAt =
+          Date.now();
+
+
+        var timeoutId;
+
+
+        /*
+         * -----------------------------------------------------
+         * CLEANUP
+         * -----------------------------------------------------
+         */
+
+        function cleanup() {
+
+          if (timeoutId) {
+
+            clearTimeout(
+              timeoutId
             );
 
           }
+
+
+          try {
+
+            delete window[
+              callbackName
+            ];
+
+          } catch (e) {
+
+            window[
+              callbackName
+            ] = undefined;
+
+          }
+
+
+          if (
+            script &&
+            script.parentNode
+          ) {
+
+            script.parentNode.removeChild(
+              script
+            );
+
+          }
+
+        }
+
+
+        /*
+         * -----------------------------------------------------
+         * SUCCESS
+         * -----------------------------------------------------
+         */
+
+        function finishSuccess(
+          data
+        ) {
+
+          if (finished) {
+
+            return;
+
+          }
+
+
+          finished =
+            true;
+
+
+          var elapsed =
+            Date.now() -
+            startedAt;
+
+
+          cleanup();
+
+
+          console.log(
+            'USD API:',
+            action,
+            '—',
+            elapsed,
+            'ms'
+          );
+
+
+          resolve(
+            data
+          );
+
+        }
+
+
+        /*
+         * -----------------------------------------------------
+         * ERROR
+         * -----------------------------------------------------
+         */
+
+        function finishError(
+          error
+        ) {
+
+          if (finished) {
+
+            return;
+
+          }
+
+
+          finished =
+            true;
+
+
+          cleanup();
+
+
+          reject(
+            error
+          );
+
+        }
+
+
+        /*
+         * -----------------------------------------------------
+         * JSONP CALLBACK
+         * -----------------------------------------------------
+         */
+
+        window[
+          callbackName
+        ] = function (
+          data
+        ) {
+
+          finishSuccess(
+            data
+          );
+
+        };
+
+
+        /*
+         * -----------------------------------------------------
+         * SCRIPT ERROR
+         * -----------------------------------------------------
+         */
+
+        script.onerror =
+          function () {
+
+            finishError(
+              new Error(
+                'Ошибка соединения с USD API.'
+              )
+            );
+
+          };
+
+
+        /*
+         * -----------------------------------------------------
+         * TIMEOUT
+         * -----------------------------------------------------
+         */
+
+        timeoutId =
+          setTimeout(
+            function () {
+
+              finishError(
+                new Error(
+                  'USD API: превышено время ожидания.'
+                )
+              );
+
+            },
+            CONFIG.API_TIMEOUT
+          );
+
+
+        /*
+         * -----------------------------------------------------
+         * REQUEST PARAMS
+         * -----------------------------------------------------
+         */
+
+        var requestParams =
+          Object.assign(
+            {},
+            params || {},
+            {
+              action:
+                action
+            }
+          );
+
+
+        /*
+         * -----------------------------------------------------
+         * QUERY
+         * -----------------------------------------------------
+         */
+
+        var query =
+          buildQuery(
+            requestParams,
+            callbackName
+          );
+
+
+        /*
+         * -----------------------------------------------------
+         * URL
+         * -----------------------------------------------------
+         */
+
+        script.src =
+          CONFIG.API_URL +
+          '?' +
+          query;
+
+
+        script.async =
+          true;
+
+
+        /*
+         * -----------------------------------------------------
+         * APPEND
+         * -----------------------------------------------------
+         */
+
+        document
+          .head
+          .appendChild(
+            script
+          );
+
+      }
+    );
+
+  }
+
+
+  /*
+   * =========================================================
+   * PUBLIC API
+   * =========================================================
+   */
+
+  async function api(
+    action,
+    params
+  ) {
+
+    var startedAt =
+      Date.now();
+
+
+    var lastError =
+      null;
+
+
+    for (
+      var attempt = 0;
+      attempt <= CONFIG.API_RETRIES;
+      attempt++
+    ) {
+
+      try {
+
+        /*
+         * ---------------------------------------------------
+         * REQUEST
+         * ---------------------------------------------------
+         */
+
+        var rawResponse =
+          await requestJsonp(
+            action,
+            params || {}
+          );
+
+
+        /*
+         * ---------------------------------------------------
+         * UNWRAP
+         * ---------------------------------------------------
+         */
+
+        var data =
+          unwrapResponse(
+            rawResponse
+          );
+
+
+        /*
+         * ---------------------------------------------------
+         * TOTAL TIME
+         * ---------------------------------------------------
+         */
+
+        var totalElapsed =
+          Date.now() -
+          startedAt;
+
+
+        console.log(
+          'USD API:',
+          action,
+          '— всего:',
+          totalElapsed,
+          'ms'
         );
+
+
+        /*
+         * ---------------------------------------------------
+         * RETURN
+         * ---------------------------------------------------
+         */
+
+        return data;
+
+
+      } catch (
+        error
+      ) {
+
+        lastError =
+          error;
+
+
+        console.error(
+          'USD API error:',
+          action,
+          'attempt:',
+          attempt + 1,
+          error
+        );
+
+
+        /*
+         * ---------------------------------------------------
+         * RETRY
+         * ---------------------------------------------------
+         */
+
+        if (
+          attempt <
+          CONFIG.API_RETRIES
+        ) {
+
+          await sleep(
+            CONFIG.RETRY_DELAY
+          );
+
+        }
 
       }
 
     }
 
+
+    throw (
+      lastError ||
+      new Error(
+        'Не удалось выполнить запрос USD API.'
+      )
+    );
+
   }
 
-  console.error(
-    'USD API: ' +
-    action +
-    ' окончательно завершился ошибкой.'
-  );
 
-  throw lastError;
+  /*
+   * =========================================================
+   * GLOBAL USD OBJECT
+   * =========================================================
+   */
 
-}
-
-  /* =====================================================
-     USD OBJECT
-     ===================================================== */
-
-  const USD = {
+  window.USD = {
 
     VERSION:
       CONFIG.VERSION,
 
-    API_URL:
-      CONFIG.API_URL,
+    CONFIG:
+      CONFIG,
 
     api:
       api,
 
-
-    /* ===================================================
-       HTML ESCAPE
-       =================================================== */
-
-    escapeHtml:
-      function (value) {
-
-        return String(
-          value ?? ''
-        )
-          .replace(
-            /&/g,
-            '&amp;'
-          )
-          .replace(
-            /</g,
-            '&lt;'
-          )
-          .replace(
-            />/g,
-            '&gt;'
-          )
-          .replace(
-            /"/g,
-            '&quot;'
-          )
-          .replace(
-            /'/g,
-            '&#039;'
-          );
-
-      },
-
-
-    /* ===================================================
-       ATTRIBUTE ESCAPE
-       =================================================== */
-
-    escapeAttribute:
-      function (value) {
-
-        return this.escapeHtml(
-          value
-        );
-
-      },
-
-
-    /* ===================================================
-       DATE
-       =================================================== */
-
-    formatDate:
-      function (value) {
-
-        if (!value) {
-          return '—';
-        }
-
-
-        const date =
-          new Date(value);
-
-
-        if (
-          Number.isNaN(
-            date.getTime()
-          )
-        ) {
-
-          return String(value);
-
-        }
-
-
-        return date.toLocaleString(
-          'ru-RU',
-          {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-          }
-        );
-
-      },
-
-
-    /* ===================================================
-       DATE ONLY
-       =================================================== */
-
-    formatDateOnly:
-      function (value) {
-
-        if (!value) {
-          return '—';
-        }
-
-
-        const date =
-          new Date(value);
-
-
-        if (
-          Number.isNaN(
-            date.getTime()
-          )
-        ) {
-
-          return String(value);
-
-        }
-
-
-        return date.toLocaleDateString(
-          'ru-RU'
-        );
-
-      },
-
-
-    /* ===================================================
-       ERROR MESSAGE
-       =================================================== */
-
     errorMessage:
-      function (error) {
-
-        if (
-          error &&
-          error.message
-        ) {
-
-          return error.message;
-
-        }
-
-
-        return String(
-          error ||
-          'Неизвестная ошибка.'
-        );
-
-      }
+      errorMessage
 
   };
 
 
-  /* =====================================================
-     GLOBAL
-     ===================================================== */
+  /*
+   * =========================================================
+   * LOG
+   * =========================================================
+   */
 
-  window.USD = USD;
-
-
-  /* =====================================================
-     READY EVENT
-     ===================================================== */
-
-  window.dispatchEvent(
-    new CustomEvent(
-      'usd:global-ready',
-      {
-        detail: {
-          version:
-            CONFIG.VERSION
-        }
-      }
-    )
+  console.log(
+    'USD Global API loaded:',
+    CONFIG.VERSION
   );
 
 
